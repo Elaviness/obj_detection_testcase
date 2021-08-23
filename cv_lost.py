@@ -4,6 +4,12 @@ import numpy as np
 from collections import Counter, defaultdict
 
 
+def inaccuracy(cx: int, cy: int, accuracy=5):
+    cx_range = list(np.arange(cx - accuracy, cx + accuracy + 1))
+    cy_range = list(np.arange(cy - accuracy, cy + accuracy + 1))
+    return [cx_range, cy_range]
+
+
 class InputVideo:
     """
     This class contains data about incoming video, that
@@ -19,6 +25,7 @@ class InputVideo:
 
         # TODO: Сделать обработку выходного пути более универсальной, а не только от корня рабочей директории
 
+    @property
     def processing(self):
         cap = cv2.VideoCapture(self.path)
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -32,6 +39,7 @@ class InputVideo:
         frameno = 0
         comparecx = [0]
         sumarea = 0
+        top_contour_dict = defaultdict(int)
 
         while cap.isOpened():
             ret, frame = cap.read()
@@ -59,8 +67,9 @@ class InputVideo:
             track_master = []
             track_temp2 = []
 
-            top_contour_dict = defaultdict(int)
+
             obj_detected_dict = defaultdict(int)
+            cx, cy = 0, 0
 
             for i, c in enumerate(cnts):
                 moment = cv2.moments(cnts[i])
@@ -78,56 +87,68 @@ class InputVideo:
                     cv2.putText(frame, 'C %s,%s' % (cx, cy), (cx, cy), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
                     sumcxcy = cx + cy
                     track_temp.append([(cx, cy), frameno])
-                    top_contour_dict[(cx, cy)] = 0
 
 # TODO переделать кривую проверку (с суммы координат центроиды на конкретные координаты +- погрешность)
+                    f = False
 
                     track_master.append([(cx, cy), frameno])
-                    countuniqueframe = set(j for i, j in track_master)
+                    inaccuracy_range = inaccuracy(cx, cy)
+                    for i in inaccuracy_range[0]:
+                        for j in inaccuracy_range[1]:
+                            if (i, j) in top_contour_dict:
+                                top_contour_dict[(i, j)] += 1
+                                cx, cy = i, j
+                                f = True
+                                break
+                        if f:
+                            break
 
-                    if len(countuniqueframe) > consecutiveframe:
-                        minframeno = min(j for i, j in track_master)
-                        for i, j in track_master:
-                            if j != minframeno:
-                                track_temp2.append([i, j])
+                    # countuniqueframe = set(j for i, j in track_master)
+                    #
+                    # if len(countuniqueframe) > consecutiveframe:
+                    #     minframeno = min(j for i, j in track_master)
+                    #     for i, j in track_master:
+                    #         if j != minframeno:
+                    #             track_temp2.append([i, j])
+                    #
+                    #     track_master = list(track_temp2)
+                    #     track_temp2 = []
+                    #
+                    # countcxcy = Counter(i for i, j in track_master)
+                    #
+                    # for i, j in countcxcy.items():
+                    #     if j >= consecutiveframe:
+                    #         top_contour_dict[i] += 1
 
-                        track_master = list(track_temp2)
-                        track_temp2 = []
 
-                    countcxcy = Counter(i for i, j in track_master)
+                    if top_contour_dict[(cx, cy)] > 10:
+                        cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 3)
+                        cv2.putText(frame, '%s' % 'CheckObject', (cx, cy), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                                    (255, 255, 255), 2)
+                        # TODO Бросать флаг найденыша/пуш уведомления об оставленном объекте
 
-                    for i, j in countcxcy.items():
-                        if j >= consecutiveframe:
-                            top_contour_dict[i] += 1
+                        obj_detected_dict[sumcxcy] = frameno
 
-                    if (cx, cy) in top_contour_dict:
-                        if top_contour_dict[(cx, cy)] > 5:
-                            cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 3)
-                            cv2.putText(frame, '%s' % 'CheckObject', (cx, cy), cv2.FONT_HERSHEY_SIMPLEX, 1,
-                                        (255, 255, 255), 2)
+                # for i, j in obj_detected_dict.items():
+                #     if frameno - obj_detected_dict[i] > 200:
+                #         obj_detected_dict.pop(i)
+                #
+                #         top_contour_dict[i] = 0
 
-                            obj_detected_dict[sumcxcy] = frameno
-
-                for i, j in obj_detected_dict.items():
-                    if frameno - obj_detected_dict[i] > 200:
-                        obj_detected_dict.pop(i)
-
-                        top_contour_dict[i] = 0
-
-                cv2.imshow('Abandoned Object Detection', frame)
+                # cv2.imshow('Abandoned Object Detection', frame)
 
                 comparecx.append(cx)
-                if comparecx[0] > 100 and comparecx[1] < 100:
+                if comparecx[0] > 100 > comparecx[1]:
                     counter = counter + 1
                     sumarea = sumarea + cv2.contourArea(c)
-                comparecx.pop(0)
+                #comparecx.pop(0)
 
             self.box_dict[frameno] = tmp_list
             img = cv2.resize(frame, (1280, 720))
             out.write(img)
 
-            if cv2.waitKey(40) & 0xFF == ord('q'):
-                break
+            # if cv2.waitKey(40) & 0xFF == ord('q'):
+            #     break
 
         cap.release()
         out.release()
@@ -136,14 +157,12 @@ class InputVideo:
 
 
 def main():
-    path = 'static_test.mp4'
+    path = 'test5.mp4'
     cap = InputVideo(path)
-    cap.processing()
+    cap.processing
     cv2.destroyAllWindows()
 
     print(cap.box_dict)
-
-
 
 
 if __name__ == '__main__':
