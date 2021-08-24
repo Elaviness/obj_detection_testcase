@@ -1,38 +1,87 @@
-import sys
 import cv2
 import numpy as np
-from collections import Counter, defaultdict
+from typing import List
+from collections import defaultdict, namedtuple
 
 
-def preproc(path="test3.mp4"):
-    cap = cv2.VideoCapture(path)
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter('result.mp4', fourcc, 20.0, (1280, 720), True)
+def inaccuracy(cx: int, cy: int, accuracy=5) -> List[list, list]:
+    cx_range = list(np.arange(cx - accuracy, cx + accuracy + 1))
+    cy_range = list(np.arange(cy - accuracy, cy + accuracy + 1))
+    return [cx_range, cy_range]
 
-    f = cv2.VideoCapture(path)
-    rval, firstframe = f.read()
-    f.release()
-    firstframe_gray = cv2.cvtColor(firstframe, cv2.COLOR_BGR2GRAY)
-    firstframe_blur = cv2.GaussianBlur(firstframe_gray, (21, 21), 0)
+def make_gray_blur(frame: np.ndarray) -> np.ndarray:
+    frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    frame_blur = cv2.GaussianBlur(frame_gray, (21, 21), 0)
+    return frame_blur
 
-    counter = 0
-    frameno = 0
-    comparecx = [0]
-    sumarea = 0
-    return_dict = {}
 
-    while cap.isOpened():
-        ret, frame = cap.read()
+class AbandonedDetection:
+    """
+    This class contains data about background frame and methods to detect
+    abandoned objects on new frames
+    """
+    frame_num = 0
+    obj_detected_dict = defaultdict(namedtuple('coordinates', 'start_frame', 'frame_count'))
+    def __init__(self, frame: np.ndarray):
+        """
+        Initialisation function that receive some frame to make it start
+        background. It needs to find difference between frames
+        :param frame: need to be cv2.read()[1] to correct processing
+        """
+        self.background = make_gray_blur(frame)
 
-        if ret == 0:
-            break
-        frameno = frameno + 1
+    def get_object(self, cnts, n: int):
+        """
 
-        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        frame_blur = cv2.GaussianBlur(frame_gray, (21, 21), 0)
+        :param cnts: contours of diff objects
+        :param n: frame number
+        :return:
+        """
+        cx, cy = 0, 0
+        tmp_list = []
 
-        frame_difference = cv2.absdiff(firstframe_blur, frame_blur)
+        for i, c in enumerate(cnts):
+            moment = cv2.moments(cnts[i])
+            if moment['m00'] == 0:
+                pass
+            else:
+                cx = int(moment['m10'] / moment['m00'])
+                cy = int(moment['m01'] / moment['m00'])
 
+            if cv2.contourArea(c) > 400:
+                (x, y, w, h) = cv2.boundingRect(c)
+                tmp_list.append((x, y, x+w, y+h))
+                self.obj_detected_dict[(cx, cy)].coordinates = (x, y, x+w, y+h)
+                self.obj_detected_dict[(cx, cy)].frame_count = 0
+
+                f = False
+
+                inaccuracy_range = inaccuracy(cx, cy)
+                for i in inaccuracy_range[0]:
+                    for j in inaccuracy_range[1]:
+                        if (i, j) in self.obj_detected_dict:
+                            self.obj_detected_dict[(i, j)].frame_count += 1
+                            cx, cy = i, j
+                            f = True
+                            break
+                    if f:
+                        break
+
+                if self.obj_detected_dict[(cx, cy)].frame_count > 100:
+                    self.obj_detected_dict[cx, cy].start_frame = n
+
+                # TODO счетчик на пропавшие объекты. Если н-фреймов нет в кадре,
+                #  то удалить из словаря
+
+    def find_difference(self, frame: np.ndarray) -> namedtuple:
+        """
+
+        :param frame: need to be cv2.read()[1] to correct processing
+        :return: namedtuple(coordinates=(x1, y1, x2, y2), num_frames=n}
+        """
+        self.frame_num += 1
+        frame = make_gray_blur(frame)
+        frame_difference = cv2.absdiff(self.background, frame)
 
         edged = cv2.Canny(frame_difference, 30, 50)
         kernel = np.ones((8, 8), np.uint8)
@@ -40,91 +89,8 @@ def preproc(path="test3.mp4"):
 
         (cnts, _) = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        cv2.putText(frame, '%s' % ('l'), (100, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
-        tmp_list = []
-        consecutiveframe = 20
+        self.get_object(cnts, self.frame_num)
 
-        track_temp = []
-        track_master = []
-        track_temp2 = []
-
-        top_contour_dict = defaultdict(int)
-        obj_detected_dict = defaultdict(int)
-
-        for i, c in enumerate(cnts):
-            M = cv2.moments(cnts[i])
-            if M['m00'] == 0:
-                pass
-            else:
-                cx = int(M['m10'] / M['m00'])
-                cy = int(M['m01'] / M['m00'])
-
-            if cv2.contourArea(c) > 400:
-                (x, y, w, h) = cv2.boundingRect(c)
-                tmp_list.append((x,y,w,h))
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-                cv2.putText(frame, 'C %s,%s' % (cx, cy), (cx, cy), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
-                sumcxcy = cx + cy
-                track_temp.append([cx + cy, frameno])
-
-                track_master.append([cx + cy, frameno])
-                countuniqueframe = set(
-                    j for i, j in track_master)
-                if len(countuniqueframe) > consecutiveframe:
-                    minframeno = min(j for i, j in track_master)
-                    for i, j in track_master:
-                        if j != minframeno:
-                            track_temp2.append([i, j])
-
-                    track_master = list(track_temp2)
-                    track_temp2 = []
+        return self.obj_detected_dict
 
 
-                countcxcy = Counter(i for i, j in track_master)
-
-                for i, j in countcxcy.items():
-                    if j >= consecutiveframe:
-                        top_contour_dict[i] += 1
-
-                if sumcxcy in top_contour_dict:
-                    if top_contour_dict[sumcxcy] > 100:
-                        cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 3)
-                        cv2.putText(frame, '%s' % ('CheckObject'), (cx, cy), cv2.FONT_HERSHEY_SIMPLEX, 1,
-                                    (255, 255, 255), 2)
-
-                        obj_detected_dict[sumcxcy] = frameno
-
-            for i, j in obj_detected_dict.items():
-                if frameno - obj_detected_dict[i] > 200:
-                    obj_detected_dict.pop(i)
-
-                    top_contour_dict[i] = 0
-
-
-            cv2.imshow('Abandoned Object Detection', frame)
-
-            comparecx.append(cx)
-            if comparecx[0] > 100 and comparecx[1] < 100:
-                counter = counter + 1
-                sumarea = sumarea + cv2.contourArea(c)
-            comparecx.pop(0)
-
-
-        return_dict[frameno] = tmp_list
-        img = cv2.resize(frame, (1280, 720))
-        out.write(img)
-        cv2.imshow('Window', frame)
-
-        if cv2.waitKey(40) & 0xFF == ord('q'):
-            break
-
-    cap.release()
-    out.release()
-    cv2.destroyAllWindows()
-    return return_dict
-
-if __name__ == "__main__":
-    video_path = sys.argv[1]
-    result = preproc(video_path)
-    print(result)

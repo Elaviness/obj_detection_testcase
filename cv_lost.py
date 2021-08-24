@@ -1,7 +1,7 @@
-# import sys
+import sys
 import cv2
 import numpy as np
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 
 def inaccuracy(cx: int, cy: int, accuracy=5):
@@ -47,7 +47,7 @@ class InputVideo:
             if ret == 0:
                 break
             frameno = frameno + 1
-
+            print(type(frame))
             frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             frame_blur = cv2.GaussianBlur(frame_gray, (21, 21), 0)
 
@@ -61,12 +61,11 @@ class InputVideo:
 
             cv2.putText(frame, '%s' % 'l', (100, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
             tmp_list = []
-            consecutiveframe = 20
+            # consecutiveframe = 20
 
             track_temp = []
             track_master = []
-            track_temp2 = []
-
+            # track_temp2 = []
 
             obj_detected_dict = defaultdict(int)
             cx, cy = 0, 0
@@ -85,10 +84,9 @@ class InputVideo:
                     cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
                     cv2.putText(frame, 'C %s,%s' % (cx, cy), (cx, cy), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
-                    sumcxcy = cx + cy
+                    # sumcxcy = cx + cy
                     track_temp.append([(cx, cy), frameno])
 
-# TODO переделать кривую проверку (с суммы координат центроиды на конкретные координаты +- погрешность)
                     f = False
 
                     track_master.append([(cx, cy), frameno])
@@ -120,13 +118,12 @@ class InputVideo:
                     #     if j >= consecutiveframe:
                     #         top_contour_dict[i] += 1
 
-
-                    if top_contour_dict[(cx, cy)] > 10:
+                    if top_contour_dict[(cx, cy)] > 100:
                         cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 3)
                         cv2.putText(frame, '%s' % 'CheckObject', (cx, cy), cv2.FONT_HERSHEY_SIMPLEX, 1,
                                     (255, 255, 255), 2)
                         # TODO Бросать флаг найденыша/пуш уведомления об оставленном объекте
-
+                        sumcxcy = cx + cy
                         obj_detected_dict[sumcxcy] = frameno
 
                 # for i, j in obj_detected_dict.items():
@@ -137,18 +134,16 @@ class InputVideo:
 
                 # cv2.imshow('Abandoned Object Detection', frame)
 
+# TODO Если н-фреймов подряд объект из obj_detected отсутствует -- убрать его из всех словарей
                 comparecx.append(cx)
                 if comparecx[0] > 100 > comparecx[1]:
                     counter = counter + 1
                     sumarea = sumarea + cv2.contourArea(c)
-                #comparecx.pop(0)
+                # comparecx.pop(0)
 
             self.box_dict[frameno] = tmp_list
             img = cv2.resize(frame, (1280, 720))
             out.write(img)
-
-            # if cv2.waitKey(40) & 0xFF == ord('q'):
-            #     break
 
         cap.release()
         out.release()
@@ -157,7 +152,8 @@ class InputVideo:
 
 
 def main():
-    path = 'test5.mp4'
+    # path = 'test5.mp4'
+    path = sys.argv[1]
     cap = InputVideo(path)
     cap.processing
     cv2.destroyAllWindows()
