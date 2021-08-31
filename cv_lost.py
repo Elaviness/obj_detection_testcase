@@ -8,7 +8,7 @@ def main():
     path = sys.argv[1]
     cap = cv2.VideoCapture(path)
     _, frame = cap.read()
-    detector = detect.AbandonedDetection(frame)
+    detector = detect.AbandonedDetection(frame, (689, 100, 239, 346))
     while (cap.isOpened()):
         _, frame = cap.read()
         res = detector.find_difference(frame)
