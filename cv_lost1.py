@@ -33,7 +33,7 @@ class AbandonedDetection:
     abandoned objects on new frames
     """
 
-    def __init__(self, frame: np.ndarray, roi=None) -> None:
+    def __init__(self, frame=None, roi=None) -> None:
         """
         Initialisation function that receive some frame to make it start
         background. It needs to find difference between frames
@@ -41,7 +41,10 @@ class AbandonedDetection:
         """
         self._frame_num = 0
         self._obj_detected_dict = defaultdict(DetectedObj)
-        self.background = make_gray_blur(frame)
+        if frame:
+            self.background = make_gray_blur(frame)
+        else:
+            self.background = frame
         self.roi = roi
 
     def is_object_in_roi(self, obj_rect):
@@ -146,16 +149,24 @@ class AbandonedDetection:
         :param frame: need to be np.ndarray to correct processing
         :return: dict where key - ( cx,cy) box-centroid coordinates, value -- class object DetectedObj
         """
-        self._frame_num += 1
-        frame = make_gray_blur(frame)
-        frame_difference = cv2.absdiff(self.background, frame)
 
-        edged = cv2.Canny(frame_difference, 30, 50)
-        kernel = np.ones((8, 8), np.uint8)
-        thresh = cv2.morphologyEx(edged, cv2.MORPH_CLOSE, kernel, iterations=3)
+        if self.background:
+            self._frame_num += 1
+            frame_gb = make_gray_blur(frame)
+            frame_difference = cv2.absdiff(self.background, frame_gb)
 
-        (cnts, _) = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            edged = cv2.Canny(frame_difference, 30, 50)
+            kernel = np.ones((8, 8), np.uint8)
+            thresh = cv2.morphologyEx(edged, cv2.MORPH_CLOSE, kernel, iterations=3)
 
-        self._get_object(cnts, self._frame_num)
+            (cnts, _) = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            if not cnts and not self._obj_detected_dict:
+                self.background = make_gray_blur(frame)
+
+            self._get_object(cnts, self._frame_num)
+
+        else:
+            self.background = make_gray_blur(frame)
 
         return self._obj_detected_dict
