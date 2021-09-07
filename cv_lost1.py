@@ -46,6 +46,7 @@ class AbandonedDetection:
         else:
             self.background = frame
         self.roi = roi
+        self.background_renew = 0
 
     def is_object_in_roi(self, obj_rect):
         roi_x1 = self.roi[0]
@@ -162,7 +163,9 @@ class AbandonedDetection:
             (cnts, _) = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
             if not cnts and not self._obj_detected_dict:
-                self.background = make_gray_blur(frame)
+                self.background_renew += 1
+                if self.background_renew >= 1000:
+                    self.background = make_gray_blur(frame)
 
             self._get_object(cnts, self._frame_num)
 
