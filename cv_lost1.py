@@ -41,10 +41,7 @@ class AbandonedDetection:
         """
         self._frame_num = 0
         self._obj_detected_dict = defaultdict(DetectedObj)
-        if frame is None:
-            self.background = frame
-        else:
-            self.background = make_gray_blur(frame)
+        self.background = None
         self.roi = roi
         self.background_renew = 0
 
@@ -157,25 +154,23 @@ class AbandonedDetection:
         :return: dict where key - ( cx,cy) box-centroid coordinates, value -- class object DetectedObj
         """
 
-        if self.background is not None and frame is not None:
-            self._frame_num += 1
-            frame_gb = make_gray_blur(frame)
-            frame_difference = cv2.absdiff(self.background, frame_gb)
-
-            edged = cv2.Canny(frame_difference, 30, 50)
-            kernel = np.ones((8, 8), np.uint8)
-            thresh = cv2.morphologyEx(edged, cv2.MORPH_CLOSE, kernel, iterations=3)
-
-            (cnts, _) = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-            if not cnts and not self._obj_detected_dict:
-                self.background_renew += 1
-                if self.background_renew >= 1000:
-                    self.background = make_gray_blur(frame)
-
-            self._get_object(cnts, self._frame_num)
-
-        elif frame is not None:
+        if self.background is None:
             self.background = make_gray_blur(frame)
+        self._frame_num += 1
+        frame_gb = make_gray_blur(frame)
+        frame_difference = cv2.absdiff(self.background, frame_gb)
+
+        edged = cv2.Canny(frame_difference, 30, 50)
+        kernel = np.ones((8, 8), np.uint8)
+        thresh = cv2.morphologyEx(edged, cv2.MORPH_CLOSE, kernel, iterations=3)
+
+        (cnts, _) = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if not cnts and not self._obj_detected_dict:
+            self.background_renew += 1
+            if self.background_renew >= 1000:
+                self.background = make_gray_blur(frame)
+
+        self._get_object(cnts, self._frame_num)
 
         return self._obj_detected_dict
