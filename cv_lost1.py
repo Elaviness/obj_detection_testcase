@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 from collections import defaultdict
 
 import cv2
@@ -33,7 +33,7 @@ class AbandonedDetection:
     abandoned objects on new frames
     """
 
-    def __init__(self, frame=None, roi=None) -> None:
+    def __init__(self, frame:Optional[np.ndarray]=None, roi=None) -> None:
         """
         Initialisation function that receive some frame to make it start
         background. It needs to find difference between frames
@@ -41,10 +41,10 @@ class AbandonedDetection:
         """
         self._frame_num = 0
         self._obj_detected_dict = defaultdict(DetectedObj)
-        if frame:
-            self.background = make_gray_blur(frame)
-        else:
+        if frame is None:
             self.background = frame
+        else:
+            self.background = make_gray_blur(frame)
         self.roi = roi
         self.background_renew = 0
 
@@ -93,36 +93,37 @@ class AbandonedDetection:
                 cx = int(moment['m10'] / moment['m00'])
                 cy = int(moment['m01'] / moment['m00'])
 
-            if self.roi:
-                (x, y, w, h) = cv2.boundingRect(c)
-                if self.is_object_in_roi((x, y, w, h)):
-                    self._obj_detected_dict[(cx, cy)].coordinates = (x, y, x + w, y + h)
-                    self._obj_detected_dict[(cx, cy)].start_frame = n
-            elif cv2.contourArea(c) > 400:
-                (x, y, w, h) = cv2.boundingRect(c)
-                self._obj_detected_dict[(cx, cy)].coordinates = (x, y, x + w, y + h)
-                self._obj_detected_dict[(cx, cy)].start_frame = n
-
             f = False
-
             inaccuracy_range = inaccuracy(cx, cy)
             for j in inaccuracy_range[0]:
                 for k in inaccuracy_range[1]:
                     if (j, k) in self._obj_detected_dict:
-                        self._obj_detected_dict[(j, k)].frame_count += 1
                         cx, cy = j, k
                         f = True
                         break
                 if f:
                     break
 
+            if self.roi:
+                (x, y, w, h) = cv2.boundingRect(c)
+                if self.is_object_in_roi((x, y, w, h)) and not self._obj_detected_dict[(cx, cy)].start_frame:
+                    self._obj_detected_dict[(cx, cy)].coordinates = (x, y, x + w, y + h)
+                    self._obj_detected_dict[(cx, cy)].start_frame = n
+                    self._obj_detected_dict[(cx, cy)].frame_count = 0
+            elif cv2.contourArea(c) > 400 and not self._obj_detected_dict[(cx, cy)].start_frame:
+                (x, y, w, h) = cv2.boundingRect(c)
+                self._obj_detected_dict[(cx, cy)].coordinates = (x, y, x + w, y + h)
+                self._obj_detected_dict[(cx, cy)].start_frame = n
+                self._obj_detected_dict[(cx, cy)].frame_count = 0
+
             if (cx, cy) in self._obj_detected_dict:
+                self._obj_detected_dict[(cx, cy)].frame_count += 1
                 if self._obj_detected_dict[(cx, cy)].frame_count > 100:
                     self._obj_detected_dict[(cx, cy)].abandoned_flag = True
 
-                self._drop_missed_box(cx, cy, n)
+        self._drop_missed_box(n)
 
-    def _drop_missed_box(self, cx: int, cy: int, n_frame) -> None:
+    def _drop_missed_box(self, n_frame) -> None:
         """
         This function check if object on frame and how long it's outside.
         :param cx: x-centroid
@@ -130,18 +131,23 @@ class AbandonedDetection:
         :param n_frame: current frame number
         :return: None
         """
-        start = self._obj_detected_dict[(cx, cy)].start_frame
-        n_frames = self._obj_detected_dict[(cx, cy)].frame_count
-        self._obj_detected_dict[(cx, cy)].end_flag = False
+        tmp = []
+        for obj in self._obj_detected_dict:
+            start = self._obj_detected_dict[obj].start_frame
+            n_frames = self._obj_detected_dict[obj].frame_count
+            # self._obj_detected_dict[(cx, cy)].end_flag = False
 
-        if start + n_frames < n_frame:
-            self._obj_detected_dict[(cx, cy)].end_flag = True
+            if start + n_frames < n_frame:
+            #     self._obj_detected_dict[(cx, cy)].end_flag = True
+            #
+            # if self._obj_detected_dict[(cx, cy)].end_flag:
+                self._obj_detected_dict[obj].drop_counter += 1
 
-        if self._obj_detected_dict[(cx, cy)].end_flag:
-            self._obj_detected_dict[(cx, cy)].drop_counter += 1
+            if self._obj_detected_dict[obj].drop_counter > 200 or not self._obj_detected_dict[obj].coordinates:
+                tmp.append(obj)
 
-        if self._obj_detected_dict[(cx, cy)].drop_counter > 500:
-            self._obj_detected_dict.pop([(cx, cy)])
+        for coordinates in tmp:
+            self._obj_detected_dict.pop(coordinates)
 
     def find_difference(self, frame: np.ndarray) -> Dict[tuple, DetectedObj]:
         """
@@ -151,7 +157,7 @@ class AbandonedDetection:
         :return: dict where key - ( cx,cy) box-centroid coordinates, value -- class object DetectedObj
         """
 
-        if self.background:
+        if self.background is not None and frame is not None:
             self._frame_num += 1
             frame_gb = make_gray_blur(frame)
             frame_difference = cv2.absdiff(self.background, frame_gb)
@@ -169,7 +175,7 @@ class AbandonedDetection:
 
             self._get_object(cnts, self._frame_num)
 
-        else:
+        elif frame is not None:
             self.background = make_gray_blur(frame)
 
         return self._obj_detected_dict

@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 
-def inaccuracy(cx: int, cy: int, accuracy=5) -> List:
+def inaccuracy(cx: int, cy: int, accuracy=10) -> List:
     """
     This method make +- range from centroid coordinates
     :param cx: x-centroid
