@@ -33,7 +33,7 @@ class AbandonedDetection:
     abandoned objects on new frames
     """
 
-    def __init__(self, frame:Optional[np.ndarray]=None, roi=None) -> None:
+    def __init__(self, frame: Optional[np.ndarray] = None, roi=None) -> None:
         """
         Initialisation function that receive some frame to make it start
         background. It needs to find difference between frames
@@ -72,6 +72,52 @@ class AbandonedDetection:
 
         return is_enough
 
+    def create_dict_obj(self, key, coordinates, frame, frame_count):
+        self._obj_detected_dict[key].coordinates = coordinates
+        self._obj_detected_dict[key].start_frame = frame
+        self._obj_detected_dict[key].frame_count = frame_count
+
+    def find_nms(self):
+        objs = list(self._obj_detected_dict.keys())
+        length = len(objs)
+        i = 0
+        j = 1
+        while i < length - 1:
+            fst_box = self._obj_detected_dict[objs[i]]
+            while j < length:
+                snd_box = self._obj_detected_dict[objs[j]]
+                boxes = [fst_box.coordinates, snd_box.coordinates]
+                idx = cv2.dnn.NMSBoxes(bboxes=boxes,
+                                       scores=np.ones(len(boxes)),
+                                       score_threshold=0.8,
+                                       nms_threshold=0.6).flatten()[0]
+                if idx.size == 1:
+                    if idx == 0:
+                        centroids = objs[i]
+                        to_delete = objs[j]
+                        j -= 1
+                    else:
+                        centroids = objs[j]
+                        to_delete = objs[i]
+                        i -= 1
+                        j -= 1
+                    length -= 1
+                    coordinates = boxes[idx]
+                    start_frame = min(self._obj_detected_dict[fst_box].start_frame,
+                                      self._obj_detected_dict[snd_box].start_frame)
+                    frame_count = max(self._obj_detected_dict[fst_box].frame_count,
+                                      self._obj_detected_dict[snd_box].frame_count)
+
+                    self.create_dict_obj(centroids,
+                                         coordinates,
+                                         start_frame,
+                                         frame_count)
+
+                    self._obj_detected_dict.pop(to_delete)
+                    objs.remove(to_delete)
+                j += 1
+            i += 1
+
     def _get_object(self, cnts, n: int) -> None:
         """
         This function work with list of contours of difference and compute centroid-coordinates,
@@ -91,7 +137,7 @@ class AbandonedDetection:
                 cy = int(moment['m01'] / moment['m00'])
 
             f = False
-            inaccuracy_range = inaccuracy(cx, cy)
+            inaccuracy_range = inaccuracy(cx, cy, 20)
             for j in inaccuracy_range[0]:
                 for k in inaccuracy_range[1]:
                     if (j, k) in self._obj_detected_dict:
@@ -101,24 +147,44 @@ class AbandonedDetection:
                 if f:
                     break
 
+            (x, y, w, h) = cv2.boundingRect(c)
+
+            # for obj in self._obj_detected_dict:
+            #     old_box = self._obj_detected_dict[obj].coordinates
+            #     new_box = (x, y, x + w, y + h)
+            #     boxes = [old_box, new_box]
+            #     idx = cv2.dnn.NMSBoxes(bboxes=boxes,
+            #                            scores=np.ones(len(boxes)),
+            #                            score_threshold=0.8,
+            #                            nms_threshold=0.2).flatten()[0]
+            #     if idx.size == 1:
+            #         if idx == 0:
+            #             (cx, cy) = obj
+            #         else:
+            #             self.create_dict_obj((cx, cy),
+            #                                  (x, y, x + w, y + h),
+            #                                  self._obj_detected_dict[obj].start_frame,
+            #                                  self._obj_detected_dict[obj].frame_count)
+            #             self
+            #             self._obj_detected_dict.pop(obj)
+            #         break
+
             if self.roi:
-                (x, y, w, h) = cv2.boundingRect(c)
                 if self.is_object_in_roi((x, y, w, h)) and not self._obj_detected_dict[(cx, cy)].start_frame:
-                    self._obj_detected_dict[(cx, cy)].coordinates = (x, y, x + w, y + h)
-                    self._obj_detected_dict[(cx, cy)].start_frame = n
-                    self._obj_detected_dict[(cx, cy)].frame_count = 0
-            elif cv2.contourArea(c) > 400 and not self._obj_detected_dict[(cx, cy)].start_frame:
-                (x, y, w, h) = cv2.boundingRect(c)
-                self._obj_detected_dict[(cx, cy)].coordinates = (x, y, x + w, y + h)
-                self._obj_detected_dict[(cx, cy)].start_frame = n
-                self._obj_detected_dict[(cx, cy)].frame_count = 0
+                    self.create_dict_obj((cx, cy), (x, y, x + w, y + h), n, 0)
+            elif cv2.contourArea(c) > 500 and not self._obj_detected_dict[(cx, cy)].start_frame:
+                self.create_dict_obj((cx, cy), (x, y, x + w, y + h), n, 0)
 
             if (cx, cy) in self._obj_detected_dict:
                 self._obj_detected_dict[(cx, cy)].frame_count += 1
                 if self._obj_detected_dict[(cx, cy)].frame_count > 100:
                     self._obj_detected_dict[(cx, cy)].abandoned_flag = True
 
+        if self._frame_num % 100 == 0 or len(self._obj_detected_dict) > 4:
+            self.find_nms()
+
         self._drop_missed_box(n)
+
 
     def _drop_missed_box(self, n_frame) -> None:
         """
@@ -135,9 +201,9 @@ class AbandonedDetection:
             # self._obj_detected_dict[(cx, cy)].end_flag = False
 
             if start + n_frames < n_frame:
-            #     self._obj_detected_dict[(cx, cy)].end_flag = True
-            #
-            # if self._obj_detected_dict[(cx, cy)].end_flag:
+                #     self._obj_detected_dict[(cx, cy)].end_flag = True
+                #
+                # if self._obj_detected_dict[(cx, cy)].end_flag:
                 self._obj_detected_dict[obj].drop_counter += 1
 
             if self._obj_detected_dict[obj].drop_counter > 200 or not self._obj_detected_dict[obj].coordinates:
@@ -145,6 +211,7 @@ class AbandonedDetection:
 
         for coordinates in tmp:
             self._obj_detected_dict.pop(coordinates)
+
 
     def find_difference(self, frame: np.ndarray) -> Dict[tuple, DetectedObj]:
         """
