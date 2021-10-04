@@ -3,6 +3,7 @@ from collections import defaultdict
 
 import cv2
 import numpy as np
+from skimage.metrics import normalized_root_mse
 
 from utils import inaccuracy, make_gray_blur
 
@@ -42,8 +43,13 @@ class AbandonedDetection:
         self._frame_num = 0
         self._obj_detected_dict = defaultdict(DetectedObj)
         self.background = None
+        self.color_background = None
         self.roi = roi
         self.background_renew = 0
+
+    def __is_static(mask, static_value=10000):
+        dif = sum(sum(mask // 127))
+        return dif < static_value
 
     def is_object_in_roi(self, obj_rect):
         roi_x1 = self.roi[0]
@@ -222,7 +228,18 @@ class AbandonedDetection:
         """
 
         if self.background is None:
+            self.color_background = frame
             self.background = make_gray_blur(frame)
+
+        movement_detector = cv2.createBackgroundSubtractorMOG2(history=50000)
+        is_moving = self.__is_static(movement_detector.apply(frame))
+        nmse = normalized_root_mse(self.color_background, frame)
+
+        if nmse > 0.5 and not is_moving:
+            self.color_background = frame
+            self.background = make_gray_blur(frame)
+            return self._obj_detected_dict
+
         self._frame_num += 1
         frame_gb = make_gray_blur(frame)
         frame_difference = cv2.absdiff(self.background, frame_gb)
@@ -236,6 +253,7 @@ class AbandonedDetection:
         if not cnts and not self._obj_detected_dict:
             self.background_renew += 1
             if self.background_renew >= 1000:
+                self.color_background = frame
                 self.background = make_gray_blur(frame)
 
         self._get_object(cnts, self._frame_num)
